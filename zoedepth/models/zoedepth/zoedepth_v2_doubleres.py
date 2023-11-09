@@ -115,7 +115,7 @@ class ZoeDepth(DepthModel):
             for i in range(len(num_out_features))
         ])
 
-        last_in = N_MIDAS_OUT + 1  # +1 for relative depth
+        last_in = N_MIDAS_OUT + 2  # +1 for relative depth and RX
 
         # use log binomial instead of softmax
         self.conditional_log_binomial = ConditionalLogBinomial(
@@ -141,7 +141,9 @@ class ZoeDepth(DepthModel):
         # print("input shape ", x.shape)
         self.orig_input_width = w
         self.orig_input_height = h
-        rel_depth, out = self.core(x, denorm=denorm, return_rel_depth=True)
+        rel_depth_, out = self.core(x, denorm=denorm, return_rel_depth=True)
+        rel_depth = rel_depth_[0]
+        rel_depth_rx = rel_depth_[1]
         # print("output shapes", rel_depth.shape, out.shape)
 
         outconv_activation = out[0]
@@ -175,11 +177,21 @@ class ZoeDepth(DepthModel):
             rel_depth = 1.0 / (rel_depth + 1e-6)
             rel_depth = (rel_depth - rel_depth.min()) / \
                 (rel_depth.max() - rel_depth.min())
+            
+            rel_depth_rx = 1.0 / (rel_depth_rx + 1e-6)
+            rel_depth_rx = (rel_depth_rx - rel_depth_rx.min()) / \
+                (rel_depth_rx.max() - rel_depth_rx.min())
+            
         # concat rel depth with last. First interpolate rel depth to last size
         rel_cond = rel_depth.unsqueeze(1)
         rel_cond = nn.functional.interpolate(
             rel_cond, size=last.shape[2:], mode='bilinear', align_corners=True)
-        last = torch.cat([last, rel_cond], dim=1)
+        
+        rel_rx_cond = rel_depth_rx.unsqueeze(1)
+        rel_rx_cond = nn.functional.interpolate(
+            rel_rx_cond, size=last.shape[2:], mode='bilinear', align_corners=True)
+        
+        last = torch.cat([last, rel_cond, rel_rx_cond], dim=1)
 
         b_embedding = nn.functional.interpolate(
             b_embedding, last.shape[-2:], mode='bilinear', align_corners=True)

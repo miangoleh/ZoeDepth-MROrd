@@ -173,12 +173,16 @@ class Resize(object):
         return nn.functional.interpolate(x, (height, width), mode='bilinear', align_corners=True)
 
 class PrepForMidas(object):
-    def __init__(self, resize_mode="minimal", keep_aspect_ratio=True, img_size=384, do_resize=True):
+    def __init__(self, resize_mode="minimal", keep_aspect_ratio=True, img_size=384, do_resize=True, ourmidas=False):
         if isinstance(img_size, int):
             img_size = (img_size, img_size)
         net_h, net_w = img_size
-        self.normalization = Normalize(
-            mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        if ourmidas:
+            self.normalization = Normalize(
+                mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        else:
+            self.normalization = Normalize(
+                mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         self.resizer = Resize(net_w, net_h, keep_aspect_ratio=keep_aspect_ratio, ensure_multiple_of=32, resize_method=resize_mode) \
             if do_resize else nn.Identity()
 
@@ -188,7 +192,7 @@ class PrepForMidas(object):
 
 class MidasCore(nn.Module):
     def __init__(self, midas, trainable=False, fetch_features=True, layer_names=('out_conv', 'l4_rn', 'r4', 'r3', 'r2', 'r1'), freeze_bn=False, keep_aspect_ratio=True,
-                 img_size=384, **kwargs):
+                 img_size=384, double_res=False, ourmidas=False, **kwargs):
         """Midas Base model used for multi-scale feature extraction.
 
         Args:
@@ -203,6 +207,8 @@ class MidasCore(nn.Module):
         super().__init__()
         self.core = midas
         self.output_channels = None
+        self.double_res = double_res
+        self.ourmidas = ourmidas
         self.core_out = {}
         self.trainable = trainable
         self.fetch_features = fetch_features
@@ -214,8 +220,12 @@ class MidasCore(nn.Module):
         self.set_trainable(trainable)
         self.set_fetch_features(fetch_features)
 
+        print("########### ourmidas:{}, double_res:{}".format(ourmidas, double_res))
         self.prep = PrepForMidas(keep_aspect_ratio=keep_aspect_ratio,
-                                 img_size=img_size, do_resize=kwargs.get('do_resize', True))
+                                 img_size=img_size, do_resize=kwargs.get('do_resize', True), ourmidas=self.ourmidas)
+        if self.double_res:
+            self.prep_RX = PrepForMidas(keep_aspect_ratio=keep_aspect_ratio,
+                                    img_size=[int(v*2) for v in img_size], do_resize=True, ourmidas=self.ourmidas)
 
         if freeze_bn:
             self.freeze_bn()
@@ -259,19 +269,32 @@ class MidasCore(nn.Module):
         with torch.no_grad():
             if denorm:
                 x = denormalize(x)
-            x = self.prep(x)
+            
+            if self.double_res:
+                rx_x = self.prep_RX(x)    
+                
+            x = self.prep(x) 
             # print("Shape after prep: ", x.shape)
 
-        with torch.set_grad_enabled(self.trainable):
+            if self.double_res:
+                rx_x = self.prep_RX(x)
+                with torch.no_grad():
+                    rel_depth_rx = self.core(rx_x)
+                    rel_depth_rx = rel_depth_rx.clone().detach() # no need to keep the grads here! its just an input to next layer.
 
+        with torch.set_grad_enabled(self.trainable):
             # print("Input size to Midascore", x.shape)
             rel_depth = self.core(x)
             # print("Output from midas shape", rel_depth.shape)
             if not self.fetch_features:
+                if self.double_res:
+                    return [rel_depth, rel_depth_rx]
                 return rel_depth
         out = [self.core_out[k] for k in self.layer_names]
 
         if return_rel_depth:
+            if self.double_res:
+                return [rel_depth, rel_depth_rx],out
             return rel_depth, out
         return out
 
@@ -340,6 +363,11 @@ class MidasCore(nn.Module):
         print("img_size", img_size)
         midas = torch.hub.load("intel-isl/MiDaS", midas_model_type,
                                pretrained=use_pretrained_midas, force_reload=force_reload)
+        
+        # change the activation layer for our ordinal model
+        if midas_model_type == "MiDaS":
+            midas.scratch.output_conv[5] = nn.Sigmoid()
+            
         kwargs.update({'keep_aspect_ratio': force_keep_ar})
         midas_core = MidasCore(midas, trainable=train_midas, fetch_features=fetch_features,
                                freeze_bn=freeze_bn, img_size=img_size, **kwargs)
@@ -368,7 +396,7 @@ class MidasCore(nn.Module):
 
 nchannels2models = {
     tuple([256]*5): ["DPT_BEiT_L_384", "DPT_BEiT_L_512", "DPT_BEiT_B_384", "DPT_SwinV2_L_384", "DPT_SwinV2_B_384", "DPT_SwinV2_T_256", "DPT_Large", "DPT_Hybrid"],
-    (512, 256, 128, 64, 64): ["MiDaS_small"]
+    (512, 256, 128, 64, 64): ["MiDaS_small"], tuple([256]*5): ["MiDaS"]
 }
 
 # Model name to number of output channels

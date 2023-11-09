@@ -1,7 +1,9 @@
 {
     "model": {
-        "name": "ZoeDepth",
-        "version_name": "v1",
+        "name": "ZoeDepth[TrainMiDaS_OurOrdinal]",
+        "version_name": "v2_doubleres",
+        "double_res": true,
+        "ourmidas": true,
         "n_bins": 64,
         "bin_embedding_dim": 128,
         "bin_centers_type": "softplus",
@@ -10,19 +12,21 @@
         "attractor_gamma": 2,
         "attractor_kind" : "mean",
         "attractor_type" : "inv",
-        "midas_model_type" : "DPT_BEiT_L_384",
+        "midas_model_type" : "MiDaS",
         "min_temp": 0.0212,
         "max_temp": 50.0,
         "output_distribution": "logbinomial",
         "memory_efficient": true,
         "inverse_midas": false,
-        "img_size": [384, 512]
+        "img_size": [384, 512],
+        "Rx": 0.2
     },
     "train": {
         "train_midas": true,
         "use_pretrained_midas": true,
-        "trainer": "zoedepth",
-        "epochs": 5,
+        "midas_weights":"local::/project/aksoy-lab/Mahdi/ZoeDepth-MROrd/weights/midas/midas_fixed_hypersim_20000.pth",
+        "trainer": "zoedepth_doubleres",
+        "epochs": 10,
         "bs": 16,
         "optim_kwargs": {"lr": 0.000161, "wd": 0.01},
         "sched_kwargs": {"div_factor": 1, "final_div_factor": 10000, "pct_start": 0.7, "three_phase":false, "cycle_momentum": true},
@@ -39,6 +43,7 @@
         "encoder_lr_factor":10,
         "pos_enc_lr_factor":10,
         "freeze_midas_bn": true
+
     },
 
     "infer":{

@@ -151,7 +151,6 @@ if __name__ == '__main__':
         nodes = ["127.0.0.1"]
 
     if config.distributed:
-
         print(config.rank)
         port = np.random.randint(15000, 15025)
         config.dist_url = 'tcp://{}:{}'.format(nodes[0], port)

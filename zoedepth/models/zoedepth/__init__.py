@@ -23,9 +23,11 @@
 # File author: Shariq Farooq Bhat
 
 from .zoedepth_v1 import ZoeDepth 
+from .zoedepth_v2_doubleres import ZoeDepth as ZoedepthV2
 
 all_versions = {
     "v1": ZoeDepth,
+    "v2_doubleres": ZoedepthV2
 }
 
 get_version = lambda v : all_versions[v]
